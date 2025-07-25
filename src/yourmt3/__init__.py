@@ -98,7 +98,7 @@ class YMT3(YourMT3):
         shared_cfg, audio_cfg, model_cfg = update_config(args, deepcopy(def_shared_cfg), stage='test')
         super().__init__(audio_cfg,model_cfg,shared_cfg,optimizer=None,task_manager=TaskManager(task_name=args.task,max_shift_steps=int(shared_cfg["TOKENIZER"]["max_shift_steps"]),debug_mode=args.debug_mode),write_output_dir=".")
         self.to(device)
-        self.load_state_dict(torch.load(model_path))
+        self.load_state_dict(torch.load(model_path),strict=False)
         self.eval()
 
 

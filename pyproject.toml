@@ -1,12 +1,12 @@
 [project]
 name = "yourmt3"
-version = "0.1.1"
+version = "0.1.2"
 description = "Music Transcription"
 readme = "README.md"
 authors = [
     { name = "dummyjenil", email = "dummyjenil@gmail.com" }
 ]
-dependencies = ['mido','mir_eval','lightning','einops','transformers==4.45.1',"torchaudio"]
+dependencies = ['mido','mir_eval','lightning','einops','transformers==4.45.1',"torchaudio","scikit-learn"]
 
 [build-system]
 requires = ["hatchling"]
