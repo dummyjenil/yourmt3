@@ -1,0 +1,13 @@
+[project]
+name = "yourmt3"
+version = "0.1.0"
+description = "Music Transcription"
+readme = "README.md"
+authors = [
+    { name = "dummyjenil", email = "dummyjenil@gmail.com" }
+]
+dependencies = ['mido','mir_eval','lightning','einops','transformers==4.45.1']
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
