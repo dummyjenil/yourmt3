@@ -1,6 +1,6 @@
 [project]
 name = "yourmt3"
-version = "0.1.2"
+version = "0.1.3"
 description = "Music Transcription"
 readme = "README.md"
 authors = [
