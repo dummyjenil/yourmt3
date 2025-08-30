@@ -17,7 +17,7 @@ from yourmt3.utils.datasets_train import get_cache_data_loader
 from yourmt3.utils.datasets_eval import get_eval_dataloader
 from yourmt3.utils.datasets_helper import create_merged_train_dataset_info, get_list_of_weighted_random_samplers
 from yourmt3.utils.task_manager import TaskManager
-from yourmt3.config.config import shared_cfg as default_shared_cfg
+from yourmt3.config.config import shared_cfg
 from yourmt3.config.config import audio_cfg as default_audio_cfg
 from yourmt3.config.data_presets import data_preset_single_cfg, data_preset_multi_cfg
 
@@ -46,14 +46,12 @@ class AMTDataModule(LightningDataModule):
                 "uhat_intra_stem_augment": True,
             },
             train_pitch_shift_range: Optional[List[int]] = None,
-            audio_cfg: Optional[Dict] = None,
-            shared_cfg: Optional[Dict] = None,) -> None:
+            audio_cfg: Optional[Dict] = None) -> None:
         super().__init__()
-        
-        self.shared_cfg = shared_cfg if shared_cfg is not None else default_shared_cfg
+
         # check path existence
         if data_home is None:
-            data_home = self.shared_cfg["PATH"]["data_home"]
+            data_home = shared_cfg["PATH"]["data_home"]
         if os.path.exists(data_home):
             self.data_home = data_home
         else:
@@ -68,11 +66,11 @@ class AMTDataModule(LightningDataModule):
 
         # task manager
         self.task_manager = task_manager
-        
+
         # train num samples per epoch, passed to the sampler
         self.train_num_samples_per_epoch = train_num_samples_per_epoch
-        assert self.shared_cfg["BSZ"]["train_local"] % self.shared_cfg["BSZ"]["train_sub"] == 0
-        self.num_train_samplers = self.shared_cfg["BSZ"]["train_local"] // self.shared_cfg["BSZ"]["train_sub"]
+        assert shared_cfg["BSZ"]["train_local"] % shared_cfg["BSZ"]["train_sub"] == 0
+        self.num_train_samplers = shared_cfg["BSZ"]["train_local"] // shared_cfg["BSZ"]["train_sub"]
 
         # train augmentation parameters
         self.train_random_amp_range = train_random_amp_range
@@ -119,7 +117,7 @@ class AMTDataModule(LightningDataModule):
             self.set_merged_train_data_info()
 
             # Distributed Weighted random sampler for training
-            actual_train_num_samples_per_epoch = self.train_num_samples_per_epoch // self.shared_cfg["BSZ"][
+            actual_train_num_samples_per_epoch = self.train_num_samples_per_epoch // shared_cfg["BSZ"][
                 "train_local"] if self.train_num_samples_per_epoch else None
             samplers = get_list_of_weighted_random_samplers(num_samplers=self.num_train_samplers,
                                                             dataset_weights=self.train_data_info["dataset_weights"],
@@ -132,7 +130,7 @@ class AMTDataModule(LightningDataModule):
                     "dataset_name": None,
                     "split": None,
                     "file_list": self.train_data_info["merged_file_list"],
-                    "sub_batch_size": self.shared_cfg["BSZ"]["train_sub"],
+                    "sub_batch_size": shared_cfg["BSZ"]["train_sub"],
                     "task_manager": self.task_manager,
                     "random_amp_range": self.train_random_amp_range,  # "0.1,0.5
                     "stem_iaug_prob": self.train_stem_iaug_prob,
@@ -171,21 +169,21 @@ class AMTDataModule(LightningDataModule):
     def train_dataloader(self) -> Any:
         loaders = {}
         for i, args_dict in enumerate(self.train_data_args):
-            loaders[f"data_loader_{i}"] = get_cache_data_loader(**args_dict, dataloader_config=self.shared_cfg["DATAIO"])
+            loaders[f"data_loader_{i}"] = get_cache_data_loader(**args_dict, dataloader_config=shared_cfg["DATAIO"])
         return CombinedLoader(loaders, mode="min_size")  # size is always identical
 
     def val_dataloader(self) -> Any:
         loaders = {}
         for args_dict in self.val_data_args:
             dataset_name = args_dict["dataset_name"]
-            loaders[dataset_name] = get_eval_dataloader(**args_dict, dataloader_config=self.shared_cfg["DATAIO"])
+            loaders[dataset_name] = get_eval_dataloader(**args_dict, dataloader_config=shared_cfg["DATAIO"])
         return loaders
 
     def test_dataloader(self) -> Any:
         loaders = {}
         for args_dict in self.test_data_args:
             dataset_name = args_dict["dataset_name"]
-            loaders[dataset_name] = get_eval_dataloader(**args_dict, dataloader_config=self.shared_cfg["DATAIO"])
+            loaders[dataset_name] = get_eval_dataloader(**args_dict, dataloader_config=shared_cfg["DATAIO"])
         return loaders
 
     """CombinedLoader in "sequential" mode returns dataloader_idx to the

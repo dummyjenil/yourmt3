@@ -32,7 +32,6 @@ class LMHead(nn.Module):
 
     def forward(self, decoder_hs: torch.FloatTensor) -> torch.FloatTensor:
         if self.tie_word_embeddings is True:
-            #print("scaling happening inside")
             # Rescale output before projecting on vocab
             # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
             decoder_hs = decoder_hs * (self.d_model**-0.5)

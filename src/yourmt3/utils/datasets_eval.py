@@ -199,7 +199,6 @@ def get_eval_dataloader(
     """
     data_home = shared_cfg["PATH"]["data_home"]
     file_list = f"{data_home}/yourmt3_indexes/{dataset_name}_{split}_file_list.json"
-    #file_list = f"/share/prj-amt/data/yourmt3_indexes/{dataset_name}_{split}_file_list.json"
 
     if audio_cfg is None:
         audio_cfg = default_audio_cfg

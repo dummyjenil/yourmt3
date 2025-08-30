@@ -1,6 +1,5 @@
 """config.py"""
 import numpy as np
-import os
 # yapf: disable
 """
 audio_cfg:
@@ -20,7 +19,7 @@ audio_cfg = {
     "n_mels": 512,  # only for melspec
     "f_min": 50.0,
     "f_max": 8000.0,
-} 
+} # TODO: currently dataloader is not updated by "input_frames"
 
 """
 model_cfg:
@@ -28,24 +27,23 @@ model_cfg:
 - 'train.py' arguments can override these defaults.
 """
 model_cfg = {
-    "encoder_type": "t5",  # {"t5", "perceiver-tf", "conformer", "musicfm"}
+    "encoder_type": "t5",  # {"t5", "perceiver-tf", "conformer"}
     "decoder_type": "t5", # {"t5", "multi-t5"}
     "pre_encoder_type": "default",  # {None, "default", "conv", "conv1d", "conv2d_avpt"} by default, t5:None, perceiver:conv.
-    "pre_encoder_type_default": {"t5": None, "perceiver-tf": "conv", "conformer": None,  "musicfm": None},
+    "pre_encoder_type_default": {"t5": None, "perceiver-tf": "conv", "conformer": None},
     "pre_decoder_type": "default", # {None, 'linear', 'conv1', 'mlp', 'group_linear'} see model/projection_layer.py
     "pre_decoder_type_default": { # [enc_type][dec_type]
         "t5": {"t5": None,},
         "perceiver-tf": {"t5": "linear", "multi-t5": "mc_shared_linear"},
         "conformer": {"t5": None,},
-        "musicfm": {"t5": None,},
     },
     "conv_out_channels": 128, # number of filters for 'conv' pre_encoder. Otherwise ignored.
-    "t5_basename": "google/t5-v1_1-small", 
+    "t5_basename": "google/t5-v1_1-small",
     "pretrained": False, # bool, if True, load pretrained weights from t5_basename. Mismatched layers are ignored.
     "use_task_conditional_encoder": True, # True by default, but default task is None. So not activated by default. 
     "use_task_conditional_decoder": True, # True by default, but default task is None. So not activated by default.  
     "d_feat": "auto", # Input audio feature dimension for encoder. Automatically inferred by audio_cfg and existence of pre_encoders.
-    "tie_word_embeddings": False, # If True, weights of embed_tokens and lm_head are tied for stabilizing gradients. 
+    "tie_word_embeddings": True, # If True, weights of embed_tokens and lm_head are tied for stabilizing gradients. 
     "vocab_size": "auto", # int or "auto", automatically inferred by task manager.
     "num_max_positions": "auto", # int or "auto". Length of positional encoding. Automatically inferred by "feat_length", "event_length" and task_manager.max_task_token_length.
     # 'vocab_size', 'tie_word_embeddings' and 'num_max_positions' are auto-copied to encoder and decoder configs in the below.
@@ -96,11 +94,6 @@ model_cfg = {
             "conv_kernel": (10, 3, 3, 3, 3, 3, 3),
             "conv_depthwise_kernel_size": 31,
         },
-        "musicfm": { 
-            "is_flash": True, 
-            "stat_path": os.path.join("musicfm", "data", "msd_stats.json"), 
-            "model_path": os.path.join("musicfm", "data", "pretrained_msd.pt"),
-            "freeze": False,}
 
     },
     "decoder": {
@@ -123,30 +116,6 @@ model_cfg = {
             "ff_layer_type": "t5_gmlp", # {'t5_gmlp', 'moe', 'mlp', 'gmlp'}. 'moe' for mixture of experts, 'mlp' for standard transformer dense layer, 'gmlp' for simple gated MLP.
             "num_channels": 13,
         },
-        "dec": {
-            "d_model": 512,
-            "hidden_size": 512, # Hidden size 
-            "num_attention_heads": 8,
-            "position_encoding_type": "rope", #{'sinusoidal', 'rope'}.
-            "num_hidden_layers": 8,
-            "hidden_act": "silu", 
-            "dropout": 0.05,
-            "intermediate_size": 1024, # wideening factor for MLP/MoE layers. Default is 2 in T5.
-            "use_cache": True,
-        },
-        "multi-dec": {
-            "d_model": 512,
-            "hidden_size": 512, # Hidden size 
-            "num_attention_heads": 8,
-            "position_encoding_type": "rope", #{'sinusoidal', 'rope'}.
-            "num_hidden_layers": 8,
-            "hidden_act": "silu", 
-            "dropout": 0.05,
-            "intermediate_size": 1024, # wideening factor for MLP/MoE layers. Default is 2 in T5.
-            "use_cache": True,
-            "num_channels": 13,
-            "training_chunk_size": 13, # process multi channel output in chunks because of memory constrains.
-        },
     },
     "feat_length": "auto", # Input audio feature length for encoder. Automatically inferred by audio_cfg.
         # mt3: 256 time steps
@@ -157,13 +126,13 @@ model_cfg = {
 # yapf: enable
 shared_cfg = {
     "PATH": {
-        "data_home": "../data/", # path to the data directory. If using relative path, it is relative to /src directory.
+        "data_home": "../../data", # path to the data directory. If using relative path, it is relative to /src directory.
     },
     "BSZ": { # global batch size is local_bsz * n_GPUs in DDP mode
         "train_sub": 12, #20, # sub-batch size is per CPU worker
         "train_local": 24, #40, # local batch size is per GPU in DDP mode
-        "validation": 52, # validation batch size is per GPU in DDP mode
-        "test": 52,
+        "validation": 64, # validation batch size is per GPU in DDP mode
+        "test": 64,
     },
     "AUGMENTATION": {
         "train_random_amp_range": [0.8, 1.1], # min and max amplitude scaling factor
@@ -227,7 +196,7 @@ T5_BASE_CFG = {
         "architectures": ["T5ForConditionalGeneration"],
         "d_ff":
             1024,  # size of the intermediate feed forward layer in each T5Block. Can be overwrten by ff_widening_factor in model_cfg.
-        "d_kv": 64,  # d_kv has to be equal to d_model // num_heads. ### go back to 64 later!
+        "d_kv": 64,  # d_kv has to be equal to d_model // num_heads.
         # "d_model": 512,  # encoder hiddnen size, defined by model_cfg
         "decoder_start_token_id": 0,
         "dense_act_fn": "gelu_new",
@@ -252,7 +221,7 @@ T5_BASE_CFG = {
     "google/t5-efficient-small": {
         "architectures": ["T5ForConditionalGeneration"],
         "d_ff": 2048,
-        "d_kv": 64,### go back to 64 later!
+        "d_kv": 64,
         "d_model": 512,
         "decoder_start_token_id": 0,
         "dropout_rate": 0.1,

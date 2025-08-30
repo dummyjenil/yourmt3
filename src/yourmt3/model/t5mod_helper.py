@@ -11,16 +11,12 @@
 import torch
 from torch import nn
 from yourmt3.model.t5mod import T5DecoderYMT3, MultiChannelT5Decoder
-try:
-     from transformers import MllamaConfig, MllamaTextModel
-except:
-    pass
 from typing import Optional, Callable, Union, Literal
 
 
 @torch.no_grad()
 def task_cond_dec_generate(decoder: Union[T5DecoderYMT3, MultiChannelT5Decoder],
-                           decoder_type: Literal["t5", "multi-t5", "multi-dec"],
+                           decoder_type: Literal["t5", "multi-t5"],
                            embed_tokens: nn.Embedding,
                            lm_head: nn.Module,
                            encoder_hidden_states: torch.FloatTensor,
@@ -59,9 +55,9 @@ def task_cond_dec_generate(decoder: Union[T5DecoderYMT3, MultiChannelT5Decoder],
     device = encoder_hidden_states.device
 
     # Prepare dec_input_shape: (B, 1) or (B, C, 1)
-    if decoder_type in ["t5", "dec"]:
+    if decoder_type == "t5":
         dec_input_shape = (bsz, 1)
-    elif decoder_type in ["multi-t5", "multi-dec"]:
+    elif decoder_type == "multi-t5":
         dec_input_shape = (bsz, decoder.num_channels, 1)
     else:
         raise ValueError(f"decoder_type {decoder_type} is not supported.")
@@ -93,9 +89,9 @@ def task_cond_dec_generate(decoder: Union[T5DecoderYMT3, MultiChannelT5Decoder],
     unfinished_sequences = torch.ones(dec_input_shape, dtype=torch.long, device=device)
 
     # Fast generation with past_key_values for the rest of the sequence
-    if decoder_type in ["t5", "dec"]:
+    if decoder_type == "t5":
         dec_input_ids = pred_ids[:, -1].unsqueeze(-1)  # (B, 1)
-    elif decoder_type in ["multi-t5", "multi-dec"]:
+    elif decoder_type == "multi-t5":
         dec_input_ids = pred_ids[:, :, -1].unsqueeze(-1)  # (B, C, 1)
     for i in range(max_length - prefix_length - 1):  # -1 for <eos> token
         if debug:
@@ -106,10 +102,9 @@ def task_cond_dec_generate(decoder: Union[T5DecoderYMT3, MultiChannelT5Decoder],
         # when past_key_values is provided, we use only the last token as input_ids
         dec_inputs_embeds = embed_tokens(dec_input_ids)  # (B, 1, D) or (B, C, 1, D)
         dec_hs, _past_key_values = decoder(inputs_embeds=dec_inputs_embeds,
-                                            encoder_hidden_states=encoder_hidden_states,
-                                            past_key_values=past_key_values,
-                                            use_cache = True,
-                                            return_dict=False)
+                                           encoder_hidden_states=encoder_hidden_states,
+                                           past_key_values=past_key_values,
+                                           return_dict=False)
         logits = lm_head(dec_hs)  # (b, 1, vocab_size) or (b, K, 1, vocab_size)
         _pred_ids = logits.argmax(-1)  # (B, 1) or (B, K, 1)
 
@@ -136,17 +131,3 @@ def task_cond_dec_generate(decoder: Union[T5DecoderYMT3, MultiChannelT5Decoder],
                 break
 
     return pred_ids  # (B, L) or (B, C, L)
-
-
-def get_cache_memory_usage(past_key_values):
-    total_bytes = 0
-    for layer in past_key_values:
-        for tensor in layer:
-            total_bytes += tensor.numel() * tensor.element_size()
-    return total_bytes
-
-def debug_cache_details(past_key_values):
-    for layer_idx, layer in enumerate(past_key_values):
-        for tensor_idx, tensor in enumerate(layer):
-            print(f"Layer {layer_idx}, tensor {tensor_idx}: shape = {tensor.shape}, dtype = {tensor.dtype}, "
-                  f"element_size = {tensor.element_size()} bytes")

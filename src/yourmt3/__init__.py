@@ -5,7 +5,7 @@ from yourmt3.utils.audio import slice_padded_array
 from yourmt3.utils.midi import note_event2midi
 from yourmt3.utils.note2event import mix_notes, note2note_event
 from yourmt3.utils.event2note import merge_zipped_note_events_and_ties_to_notes
-from yourmt3.utils.note_event_dataclasses import Note
+from yourmt3.utils.note_event_dataclasses import Event, Note
 from yourmt3.utils.task_manager import TaskManager
 from yourmt3.utils.utils import str2bool
 from yourmt3.model.ymt3 import YourMT3
@@ -65,8 +65,6 @@ def model_name2conf(model_name,precision):
         args = args + ['-tk', 'mc13_full_plus_256', '-dec', 'multi-t5','-nl', '26']
     if "MoE" in model_name:
         args = args + ['-sqr', '1', '-ff', 'moe','-wf', '4', '-nmoe', '8', '-kmoe', '2', '-act', 'silu', '-epe', 'rope','-rp', '1']
-    if "MusicFM" in model_name:
-        args = args + ['-if', '87381', '-enc', 'musicfm', '-dpe', 'rope', '-sqr', '1', '-tk', 'mc13_full_plus_1024', '-dec', 'multi-dec']
 
     parser = ArgumentParser()
     parser.add_argument('-ac', '--audio-codec', type=str, default=None, help='audio codec (default=None). {"spec", "melspec"}. If None, default value defined in config.py will be used.')
@@ -133,23 +131,23 @@ def model_name2conf(model_name,precision):
 
 
 class YMT3:
-    def __init__(self,model_path,model_name:Literal["YMT3+", "YPTF+Single", "YPTF+Multi", "YPTF+MoE+Multi","YMT3+MusicFM"],precision:Literal["32", "bf16-mixed", "16"],device):
+    def __init__(self,model_path,model_name:Literal["YMT3+", "YPTF+Single", "YPTF+Multi", "YPTF+MoE+Multi"],precision:Literal["32", "bf16-mixed", "16"] = "32",device = "cpu"):
         args = model_name2conf(model_name,precision)
         shared_cfg, audio_cfg, model_cfg = update_config(args, deepcopy(def_shared_cfg), stage='test')
-        self.model = YourMT3(audio_cfg,model_cfg,shared_cfg,optimizer=None,task_manager=TaskManager(task_name=args.task,max_shift_steps=int(shared_cfg["TOKENIZER"]["max_shift_steps"]),debug_mode=args.debug_mode),eval_subtask_key=args.eval_subtask_key)
-        self.model.to(device)
+        self.model = YourMT3(audio_cfg,model_cfg,shared_cfg,optimizer=None,task_manager=TaskManager(task_name=args.task,max_shift_steps=int(shared_cfg["TOKENIZER"]["max_shift_steps"]),debug_mode=args.debug_mode),eval_subtask_key=args.eval_subtask_key,write_output_dir=".")
         self.model.load_state_dict(torch.load(model_path),strict=False)
+        self.model.to(device)
         self.model.eval()
 
     def create_instrument_task_tokens(self, n_segments,instrument):
         if instrument != "default":
-            task_token_ids = [self.model.task_manager.tokenizer.codec.encode_event(event) for event in self.model.task_manager.task['eval_subtask_prefix'][instrument]]
+            task_token_ids = [self.model.task_manager.tokenizer.codec.encode_event(event) for event in [Event("program",100),Event("program",101)]] # Singing And chorus
             task_tokens = torch.zeros((n_segments, 1, len(task_token_ids)), dtype=torch.long, device=self.model.device)
             for i in range(n_segments):
                 task_tokens[i, 0, :] = torch.tensor(task_token_ids, dtype=torch.long)
             return task_tokens
 
-    def predict(self,filepath,batch_size=8,confidence_threshold:float=0.7,instrument:Literal["singing-only","drum-only","default"]="default",callback:Callable[[int,int],None]=None,output_path="output.mid"):
+    def predict(self,filepath,batch_size=8,confidence_threshold:float=0.7,instrument:Literal["singing-only","default"]="default",callback:Callable[[int,int],None]=None,output_path="output.mid"):
         audio, sr = torchaudio.load(filepath)
         audio = torch.mean(audio, dim=0).unsqueeze(0)
         audio = torchaudio.functional.resample(audio, sr, self.model.audio_cfg['sample_rate'])
@@ -165,6 +163,6 @@ class YMT3:
             zipped_note_events_and_tie, _, _ = self.model.task_manager.detokenize_list_batches(pred_token_arr_ch, start_secs_file, return_events=True)
             pred_notes_ch, _ = merge_zipped_note_events_and_ties_to_notes(zipped_note_events_and_tie)
             pred_notes_in_file.append(pred_notes_ch)
-        note_event2midi(note2note_event([note if note.is_drum else Note(is_drum=note.is_drum,program=self.model.midi_output_inverse_vocab.get(note.program, [note.program])[0],onset=note.onset,offset=note.offset,pitch=note.pitch,velocity=note.velocity) for note in filter_instrument_consistency(mix_notes(pred_notes_in_file),confidence_threshold,allow=bool(instrument))], return_activity=False), output_path, output_inverse_vocab=self.model.midi_output_inverse_vocab)
+        note_event2midi(note2note_event([note if note.is_drum else Note(is_drum=note.is_drum,program=self.model.midi_output_inverse_vocab.get(note.program, [note.program])[0],onset=note.onset,offset=note.offset,pitch=note.pitch,velocity=note.velocity) for note in filter_instrument_consistency(mix_notes(pred_notes_in_file),confidence_threshold,allow=bool(instrument !="default"))], return_activity=False), output_path, output_inverse_vocab=self.model.midi_output_inverse_vocab)
         return output_path
 

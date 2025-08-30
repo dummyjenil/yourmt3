@@ -210,7 +210,7 @@ def update_config(args, shared_cfg, stage: Literal['train', 'test'] = 'train'):
     if args.decoder_position_encoding_type != 'default':
         if args.decoder_position_encoding_type in ['None', 'none', '0']:
             raise ValueError('Decoder PE type cannot be None')
-        elif args.decoder_position_encoding_type in ['sinusoidal', 'trainable', 'rope']:
+        elif args.decoder_position_encoding_type in ['sinusoidal', 'trainable']:
             model_cfg["decoder"][model_cfg["decoder_type"]]["position_encoding_type"] = str(
                 args.decoder_position_encoding_type)
         else:

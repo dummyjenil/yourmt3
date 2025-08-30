@@ -20,11 +20,8 @@ import pytorch_lightning as pl
 import numpy as np
 # import wandb
 
-from yourmt3.model.musicfm.model.musicfm_25hz import MusicFM25Hz
 from transformers import T5Config
-from yourmt3.model.adapter_utils import MusicFMAdapter, get_feat_length, TemporalUpsample
 from yourmt3.model.t5mod import T5EncoderYMT3, T5DecoderYMT3, MultiChannelT5Decoder
-from yourmt3.model.decmod import YMT3DecoderConfig, DecoderYMT3, MultiChannelDecoderYMT3
 from yourmt3.model.t5mod_helper import task_cond_dec_generate
 from yourmt3.model.perceiver_mod import PerceiverTFEncoder
 from yourmt3.model.perceiver_helper import PerceiverTFConfig
@@ -102,12 +99,7 @@ class YourMT3(pl.LightningModule):
         # Spec Layer (need to define here to infer max token length)
         self.spectrogram, spec_output_shape = get_spectrogram_layer_from_audio_cfg(
             audio_cfg)  # can be spec or melspec; output_shape is (T, F)
-        self.input_frames = audio_cfg["input_frames"]
-        if model_cfg["encoder_type"] == 'musicfm':
-             input_frames = audio_cfg["input_frames"]
-             model_cfg["feat_length"] = get_feat_length(input_frames) ## function used is a bit hacky, might fail on edge cases. 
-        else:
-            model_cfg["feat_length"] = spec_output_shape[0]  # T of (T, F)
+        model_cfg["feat_length"] = spec_output_shape[0]  # T of (T, F)
 
         # Task manger and Tokens
         self.task_manager = task_manager
@@ -118,10 +110,10 @@ class YourMT3(pl.LightningModule):
         self.use_task_cond_decoder = bool(model_cfg["use_task_conditional_decoder"])
 
         # Select Encoder type, Model-specific Config
-        assert model_cfg["encoder_type"] in ["t5", "perceiver-tf", "conformer", "musicfm"]
-        assert model_cfg["decoder_type"] in ["t5", "multi-t5", "dec", "multi-dec"]
-        self.encoder_type = model_cfg["encoder_type"]  # {"t5", "perceiver-tf", "conformer", "musicfm"}
-        self.decoder_type = model_cfg["decoder_type"]  # {"t5", "multi-t5, "dec"}
+        assert model_cfg["encoder_type"] in ["t5", "perceiver-tf", "conformer"]
+        assert model_cfg["decoder_type"] in ["t5", "multi-t5"]
+        self.encoder_type = model_cfg["encoder_type"]  # {"t5", "perceiver-tf", "conformer"}
+        self.decoder_type = model_cfg["decoder_type"]  # {"t5", "multi-t5"}
         encoder_config = model_cfg["encoder"][self.encoder_type]  # mutable
         decoder_config = model_cfg["decoder"][self.decoder_type]  # mutable
 
@@ -205,7 +197,7 @@ class YourMT3(pl.LightningModule):
 
         # Pre-decoder
         self.pre_decoder = nn.Sequential()
-        if self.encoder_type == "perceiver-tf" and self.decoder_type in ["t5", "dec"]:
+        if self.encoder_type == "perceiver-tf" and self.decoder_type == "t5":
             t, f, c = pre_enc_output_shape  # perceiver-tf: (110, 128, 128) for 2s
             encoder_output_shape = (t, encoder_config["num_latents"], encoder_config["d_latent"])  # (T, K, D_source)
             decoder_input_shape = (t, decoder_config["d_model"])  # (T, D_target)
@@ -216,11 +208,7 @@ class YourMT3(pl.LightningModule):
             self.encoder_output_shape = encoder_output_shape
             self.decoder_input_shape = decoder_input_shape
             self.pre_decoder.append(proj_layer)
-        elif self.encoder_type == "musicfm" and self.decoder_type in ["t5", "dec"]:
-            decoder_input_dim = decoder_config["d_model"]
-            upsamp_layer = TemporalUpsample(input_dim = 1024, output_dim = decoder_input_dim)
-            self.pre_decoder.append(upsamp_layer)
-        elif self.encoder_type in ["t5", "conformer"] and self.decoder_type in ["t5", "dec"]:
+        elif self.encoder_type in ["t5", "conformer"] and self.decoder_type == "t5":
             pass
         elif self.encoder_type == "perceiver-tf" and self.decoder_type == "multi-t5":
             # NOTE: this is experiemental, only for multi-channel decoding with 13 classes
@@ -231,13 +219,6 @@ class YourMT3(pl.LightningModule):
                                                             output_shape=decoder_input_shape,
                                                             proj_type=self.pre_decoder_type)
             self.pre_decoder.append(proj_layer)
-        elif self.encoder_type == "musicfm" and self.decoder_type == 'multi-dec':
-            decoder_channels = decoder_config["num_channels"]
-            decoder_input_dim = decoder_config["d_model"]
-            adapter = MusicFMAdapter(1024, dec_hidden_size=decoder_input_dim, num_heads=8, k=13, emb_size=512, num_layers=3, n_iter=4)
-            self.pre_decoder.append(adapter)
-            upsamp_layer = TemporalUpsample(input_dim = decoder_input_dim, output_dim = decoder_input_dim)
-            self.pre_decoder.append(upsamp_layer)
         else:
             raise NotImplementedError(
                 f"Encoder type {self.encoder_type} and decoder type {self.decoder_type} is not implemented yet.")
@@ -245,7 +226,7 @@ class YourMT3(pl.LightningModule):
         # Positional Encoding, Vocab, etc.
         if self.encoder_type in ["t5", "conformer"]:
             encoder_config["num_max_positions"] = decoder_config["num_max_positions"] = model_cfg["num_max_positions"]
-        else:  # perceiver-tf and musicfm use separate positional encoding
+        else:  # perceiver-tf uses separate positional encoding
             encoder_config["num_max_positions"] = model_cfg["feat_length"]
             decoder_config["num_max_positions"] = model_cfg["num_max_positions"]
         encoder_config["vocab_size"] = decoder_config["vocab_size"] = model_cfg["vocab_size"]
@@ -317,40 +298,11 @@ class YourMT3(pl.LightningModule):
             conformer_config.update(self.model_cfg["encoder"]["conformer"])
             self.encoder = ConformerYMT3Encoder(conformer_config)
 
-        elif self.encoder_type == 'musicfm':
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            stat_path = os.path.join(base_dir, "musicfm", "data", "msd_stats.json")
-            model_path = os.path.join(base_dir, "musicfm", "data", "pretrained_msd.pt")
-            
-            if self.model_cfg["encoder"]["musicfm"]["is_flash"]: ## need to set bf16 or f16 for flash attention -- check to do manually if trainig fails
-                self.encoder = MusicFM25Hz(is_flash = True, 
-                                        stat_path = stat_path, 
-                                        model_path = model_path)
-            else:
-                self.encoder = MusicFM25Hz(is_flash = False, 
-                                        stat_path = stat_path, 
-                                        model_path = model_path)
-            if self.model_cfg["encoder"]["musicfm"]["freeze"]:
-                for param in self.encoder.parameters():
-                    param.requires_grad = False
-
-                # for layer in self.encoder.conformer.layers[-2:]:
-                #     for param in layer.parameters():
-                #         param.requires_grad = True
-                print("Training Frozen MusicFM Encoder")
-            else:
-                print("Fine-tuning MusicFM")
-
         if self.decoder_type == "t5":
             self.decoder = T5DecoderYMT3(self.model_cfg["decoder"]["t5"], t5_config)
-        elif self.decoder_type == "dec":
-            dec_config = YMT3DecoderConfig()
-            self.decoder = DecoderYMT3(self.model_cfg["decoder"]["dec"], dec_config)
         elif self.decoder_type == "multi-t5":
             self.decoder = MultiChannelT5Decoder(self.model_cfg["decoder"]["multi-t5"], t5_config)
-        elif self.decoder_type == "multi-dec":
-            dec_config = YMT3DecoderConfig()
-            self.decoder = MultiChannelDecoderYMT3(self.model_cfg["decoder"]["multi-dec"], dec_config)
+
         # `shift_right` function for decoding
         self.shift_right_fn = self.decoder._shift_right
 
@@ -420,18 +372,11 @@ class YourMT3(pl.LightningModule):
                     pshift_range=[self.test_pitch_shift_semitone, self.test_pitch_shift_semitone])
 
     def configure_optimizers(self) -> None:
-
-        if self.encoder_type == "musicfm":
-            pretrained_encoder = True
-        else:
-            pretrained_encoder = False
-
         """Configure optimizer and scheduler"""
         optimizer, base_lr = get_optimizer(models_dict=self.named_parameters(),
                                            optimizer_name=self.hparams.optimizer_name,
                                            base_lr=self.hparams.base_lr,
-                                           weight_decay=self.hparams.weight_decay,
-                                           pretrained_encoder = pretrained_encoder)
+                                           weight_decay=self.hparams.weight_decay)
 
         if self.hparams.optimizer_name.lower() == 'adafactor' and self.hparams.base_lr == None:
             print("Using AdaFactor with auto learning rate and no scheduler")
@@ -475,23 +420,16 @@ class YourMT3(pl.LightningModule):
 
         NOTE: all the commented shapes are in the case of original MT3 setup.
         """
-            
-        if self.encoder_type == 'musicfm':
-            pass
-        else:
-            x = self.spectrogram(x)  # mel-/spectrogram: (b, 256, 512) or (B, T, F)
-            x = self.pre_encoder(x)  # projection to d_model: (B, 256, 512)
+        x = self.spectrogram(x)  # mel-/spectrogram: (b, 256, 512) or (B, T, F)
+        x = self.pre_encoder(x)  # projection to d_model: (B, 256, 512)
 
         # TODO: task_cond_encoder would not work properly because of 3-d task_tokens
         # if task_tokens is not None and task_tokens.numel() > 0 and self.use_task_cond_encoder is True:
         #     # append task embedding to encoder input
         #     task_embed = self.embed_tokens(task_tokens)  # (B, task_len, 512)
         #     x = torch.cat([task_embed, x], dim=1)  # (B, task_len + 256, 512)
-
-        enc_hs = self.encoder(inputs_embeds=x)["last_hidden_state"]  
-        
+        enc_hs = self.encoder(inputs_embeds=x)["last_hidden_state"]  # (B, T', D)
         enc_hs = self.pre_decoder(enc_hs)  # (B, T', D) or (B, K, T, D)
-        # print('Shape after Encoder:', enc_hs.shape) #correct 4
 
         # if task_tokens is not None and task_tokens.numel() > 0 and self.use_task_cond_decoder is True:
         #     # append task token to decoder input and output label
@@ -503,18 +441,18 @@ class YourMT3(pl.LightningModule):
             labels = labels.squeeze(1)  # (B, N)
 
         dec_input_ids = self.shift_right_fn(labels)  # t5:(B, N), multi-t5:(B, C, N)
-        
         dec_inputs_embeds = self.embed_tokens(dec_input_ids)  # t5:(B, N, D), multi-t5:(B, C, N, D)
+        dec_hs, _ = self.decoder(inputs_embeds=dec_inputs_embeds, encoder_hidden_states=enc_hs, return_dict=False)
 
-        dec_hs, = self.decoder(inputs_embeds=dec_inputs_embeds, encoder_hidden_states=enc_hs, return_dict=False, use_cache=False)
+        if self.model_cfg["tie_word_embeddings"] is True:
+            dec_hs = dec_hs * (self.model_cfg["decoder"][self.decoder_type]["d_model"]**-0.5)
+
         logits = self.lm_head(dec_hs)
 
         loss = None
         labels = labels.masked_fill(labels == 0, value=-100)  # ignore pad tokens for loss
         loss_fct = CrossEntropyLoss(ignore_index=-100)
         loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
-
-        #print('loss', loss, 'logits', logits)
         return {"logits": logits, "loss": loss}
 
     def inference(self,
@@ -535,29 +473,20 @@ class YourMT3(pl.LightningModule):
         if self.test_pitch_shift_layer is not None:
             x_ps = self.pitchshift(x, self.test_pitch_shift_semitone)
             x = x_ps
-       
-        if self.encoder_type == 'musicfm':
-            pass
-        else:
-            x = self.spectrogram(x)  # mel-/spectrogram: (b, 256, 512) or (B, T, F)
-            x = self.pre_encoder(x)  # projection to d_model: (B, 256, 512)
-        # From spectrogram to pre-decoder is the same pipeline as in forward()
-        if task_tokens is not None:
-            print("task_tokens", task_tokens)
 
+        # From spectrogram to pre-decoder is the same pipeline as in forward()
+        x = self.spectrogram(x)  # mel-/spectrogram: (b, 256, 512) or (B, T, F)
+        x = self.pre_encoder(x)  # projection to d_model: (B, 256, 512)
         if task_tokens is not None and task_tokens.numel() > 0 and self.use_task_cond_encoder is True:
             # append task embedding to encoder input
             task_embed = self.embed_tokens(task_tokens)  # (B, task_len, 512)
             x = torch.cat([task_embed, x], dim=1)  # (B, task_len + 256, 512)
-
         enc_hs = self.encoder(inputs_embeds=x)["last_hidden_state"]  # (B, task_len + 256, 512)
-
         enc_hs = self.pre_decoder(enc_hs)  # (B, task_len + 256, 512)
 
         # Cached-autoregressive decoding with task token (can be None) as prefix
         if max_token_length is None:
             max_token_length = self.max_total_token_length
-        #print("Max_token_length", max_token_length)
 
         pred_ids = task_cond_dec_generate(decoder=self.decoder,
                                           decoder_type=self.decoder_type,
@@ -649,7 +578,6 @@ class YourMT3(pl.LightningModule):
             else:
                 loss = None
         if callback:callback(n_items,n_items)
-
         if self.test_pitch_shift_layer is not None:  # debug only
             if self.hparams.write_output_dir is not None:
                 x_ps_concat = torch.cat(x_ps_concat, dim=0)
@@ -696,10 +624,10 @@ class YourMT3(pl.LightningModule):
         # audio_segments, notes_dict, note_token_array, task_token_array = batch
         audio_segments, notes_dict, note_token_array = batch
         task_token_array = None
-        input_frames = self.input_frames
+
         # Loop through the tensor in chunks of bsz (=subbsz actually)
         n_items = audio_segments.shape[0]
-        start_secs_file = [self.input_frames * i / 16000 for i in range(n_items)]
+        start_secs_file = [32767 * i / 16000 for i in range(n_items)]
         with Timer() as t:
             pred_token_array_file, loss = self.inference_file(bsz, audio_segments, note_token_array, task_token_array)
             """
@@ -769,15 +697,6 @@ class YourMT3(pl.LightningModule):
         self.log('val_loss', loss, prog_bar=True, batch_size=n_items, sync_dist=True)
         # self.val_metrics[dataloader_idx].bulk_update_errors({'decoding_time': decoding_time_sec})
 
-    def on_before_optimizer_step(self, optimizer):
-        # Option 1: Compute total norm (similar to track_grad_norm=2)
-        norms = [p.grad.detach().norm(2) for p in self.parameters() if p.grad is not None]
-        if not norms: # Handle case with no gradients
-            return
-        total_norm = torch.stack(norms).norm(2)
-        if torch.isnan(total_norm) or torch.isinf(total_norm) or total_norm > 100: # Check for NaN, inf or a large threshold
-             print(f"WARNING: High gradient norm detected: {total_norm}")
-
     def on_validation_epoch_end(self) -> None:
         for val_metrics in self.val_metrics:
             self.log_dict(val_metrics.bulk_compute(), sync_dist=True)
@@ -803,7 +722,7 @@ class YourMT3(pl.LightningModule):
 
         # Loop through the tensor in chunks of bsz (=subbsz actually)
         n_items = audio_segments.shape[0]
-        start_secs_file = [self.input_frames * i / 16000 for i in range(n_items)]
+        start_secs_file = [32767 * i / 16000 for i in range(n_items)]
 
         if self.test_pitch_shift_layer is not None and self.hparams.write_output_dir is not None:
             pred_token_array_file, loss, x_ps = self.inference_file(bsz, audio_segments, None, None)
@@ -940,4 +859,111 @@ class YourMT3(pl.LightningModule):
             test_metrics.bulk_reset()
         # self.log_dict(self.test_metrics_macro.bulk_compute(), sync_dist=True)
         # self.test_metrics_macro.bulk_reset()
-    
+
+
+def test_case_forward_mt3():
+    import torch
+    from yourmt3.config.config import audio_cfg, model_cfg, shared_cfg
+    from yourmt3.model.ymt3 import YourMT3
+    model = YourMT3()
+    model.eval()
+    x = torch.randn(2, 1, 32767)
+    labels = torch.randint(0, 596, (2, 1, 1024), requires_grad=False)  # (B, C=1, T)
+    task_tokens = torch.LongTensor([])
+    output = model.forward(x, labels, task_tokens)
+    logits, loss = output['logits'], output['loss']
+    assert logits.shape == (2, 1024, 596)  # (B, N, vocab_size)
+
+
+def test_case_inference_mt3():
+    import torch
+    from yourmt3.config.config import audio_cfg, model_cfg, shared_cfg
+    from yourmt3.model.ymt3 import YourMT3
+    model_cfg["num_max_positions"] = 1024 + 3 + 1
+    model = YourMT3(model_cfg=model_cfg)
+    model.eval()
+    x = torch.randn(2, 1, 32767)
+    task_tokens = torch.randint(0, 596, (2, 3), requires_grad=False)
+    pred_ids = model.inference(x, task_tokens, max_token_length=10)  # (2, 3, 9) (B, C, L-task_len)
+    # TODO: need to check the length of pred_ids when task_tokens is not None
+
+
+def test_case_forward_enc_perceiver_tf_dec_t5():
+    import torch
+    from yourmt3.model.ymt3 import YourMT3
+    from yourmt3.config.config import audio_cfg, model_cfg, shared_cfg
+    model_cfg["encoder_type"] = "perceiver-tf"
+    audio_cfg["codec"] = "spec"
+    audio_cfg["hop_length"] = 300
+
+    model = YourMT3(audio_cfg=audio_cfg, model_cfg=model_cfg)
+    model.eval()
+
+    x = torch.randn(2, 1, 32767)
+    labels = torch.randint(0, 596, (2, 1, 1024), requires_grad=False)
+
+    # forward
+    output = model.forward(x, labels)
+    logits, loss = output['logits'], output['loss']  # logits: (2, 1024, 596) (B, N, vocab_size)
+
+    # inference
+    pred_ids = model.inference(x, None, max_token_length=3)  # (2, 1, 3) (B, C, L)
+
+
+def test_case_forward_enc_conformer_dec_t5():
+    import torch
+    from yourmt3.model.ymt3 import YourMT3
+    from yourmt3.config.config import audio_cfg, model_cfg, shared_cfg
+    model_cfg["encoder_type"] = "conformer"
+    audio_cfg["codec"] = "melspec"
+    audio_cfg["hop_length"] = 128
+    model = YourMT3(audio_cfg=audio_cfg, model_cfg=model_cfg)
+    model.eval()
+
+    x = torch.randn(2, 1, 32767)
+    labels = torch.randint(0, 596, (2, 1024), requires_grad=False)
+
+    # forward
+    output = model.forward(x, labels)
+    logits, loss = output['logits'], output['loss']  # logits: (2, 1024, 596) (B, N, vocab_size)
+
+    # inference
+    pred_ids = model.inference(x, None, 20)  # (2, 1, 20) (B, C, L)
+
+
+def test_case_enc_perceiver_tf_dec_multi_t5():
+    import torch
+    from yourmt3.model.ymt3 import YourMT3
+    from yourmt3.config.config import audio_cfg, model_cfg, shared_cfg
+    model_cfg["encoder_type"] = "perceiver-tf"
+    model_cfg["decoder_type"] = "multi-t5"
+    model_cfg["encoder"]["perceiver-tf"]["attention_to_channel"] = True
+    model_cfg["encoder"]["perceiver-tf"]["num_latents"] = 26
+    audio_cfg["codec"] = "spec"
+    audio_cfg["hop_length"] = 300
+    model = YourMT3(audio_cfg=audio_cfg, model_cfg=model_cfg)
+    model.eval()
+
+    x = torch.randn(2, 1, 32767)
+    labels = torch.randint(0, 596, (2, 13, 200), requires_grad=False)  # (B, C, T)
+
+    # x = model.spectrogram(x)
+    # x = model.pre_encoder(x)  # (2, 110, 128, 128) (B, T, C, D)
+    # enc_hs = model.encoder(inputs_embeds=x)["last_hidden_state"]  # (2, 110, 128, 128) (B, T, C, D)
+    # enc_hs = model.pre_decoder(enc_hs)  # (2, 13, 110, 512) (B, C, T, D)
+
+    # dec_input_ids = model.shift_right_fn(labels)  # (2, 13, 200) (B, C, T)
+    # dec_inputs_embeds = model.embed_tokens(dec_input_ids)  # (2, 13, 200, 512) (B, C, T, D)
+    # dec_hs, _ = model.decoder(
+    #     inputs_embeds=dec_inputs_embeds, encoder_hidden_states=enc_hs, return_dict=False)
+    # logits = model.lm_head(dec_hs)  # (2, 13, 200, 596) (B, C, T, vocab_size)
+
+    # forward
+    x = torch.randn(2, 1, 32767)
+    labels = torch.randint(0, 596, (2, 13, 200), requires_grad=False)  # (B, C, T)
+    output = model.forward(x, labels)
+    logits, loss = output['logits'], output['loss']  # (2, 13, 200, 596) (B, C, T, vocab_size)
+
+    # inference
+    model.max_total_token_length = 123  # to save time..
+    pred_ids = model.inference(x, None)  # (2, 13, 123) (B, C, L)
