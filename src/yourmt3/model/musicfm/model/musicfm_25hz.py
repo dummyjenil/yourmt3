@@ -20,9 +20,9 @@ import math
 from torch import nn
 from einops import rearrange
 from torchaudio.transforms import Resample
-from ..modules.random_quantizer import RandomProjectionQuantizer
-from ..modules.features import MelSTFT
-from ..modules.conv import Conv2dSubsampling
+from yourmt3.model.musicfm.modules.random_quantizer import RandomProjectionQuantizer
+from yourmt3.model.musicfm.modules.features import MelSTFT
+from yourmt3.model.musicfm.modules.conv import Conv2dSubsampling
 
 
 class MusicFM25Hz(nn.Module):
@@ -92,7 +92,7 @@ class MusicFM25Hz(nn.Module):
         # Conformer
         if is_flash:
             print("Using Flash Attention!")
-            from ..modules.flash_conformer import (
+            from yourmt3.model.musicfm.modules.flash_conformer import (
                 Wav2Vec2ConformerEncoder,
                 Wav2Vec2ConformerConfig,
             )

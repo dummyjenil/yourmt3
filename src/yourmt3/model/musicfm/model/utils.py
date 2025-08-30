@@ -4,7 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..modules.flash_conformer import Wav2Vec2ConformerEncoderLayer, Wav2Vec2ConformerConfig, Wav2Vec2ConformerRotaryPositionalEmbedding
+from yourmt3.model.musicfm.modules.flash_conformer import Wav2Vec2ConformerEncoderLayer, Wav2Vec2ConformerConfig, Wav2Vec2ConformerRotaryPositionalEmbedding
 
 class Stemifier(nn.Module):
     def __init__(self, num_iter=5):
