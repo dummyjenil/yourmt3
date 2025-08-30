@@ -101,6 +101,33 @@ task_cfg = {
         "max_note_token_length_per_ch": 256, # multi-channel decoding exclusive parameter
         "mask_loss_strategy": None, # multi-channel decoding exclusive parameter
     },
+    "mc13_full_plus_2048": { # multi-channel decoding task of {34 classes + drums + singing & chorus} mapped to 13 channels
+        "name": "mc13_full_plus_2048",
+        "train_program_vocab": program_vocab_presets["mt3_full_plus"],
+        "train_drum_vocab": drum_vocab_presets["gm"],
+        "program2channel_vocab_source": program_vocab_presets["gm_plus"],
+        "num_decoding_channels": 13,
+        "max_note_token_length_per_ch": 2048, # multi-channel decoding exclusive parameter
+        "mask_loss_strategy": None, # multi-channel decoding exclusive parameter
+    },
+    "mc13_full_plus_1024": { # multi-channel decoding task of {34 classes + drums + singing & chorus} mapped to 13 channels
+        "name": "mc13_full_plus_1024",
+        "train_program_vocab": program_vocab_presets["mt3_full_plus"],
+        "train_drum_vocab": drum_vocab_presets["gm"],
+        "program2channel_vocab_source": program_vocab_presets["gm_plus"],
+        "num_decoding_channels": 13,
+        "max_note_token_length_per_ch": 1024, # multi-channel decoding exclusive parameter
+        "mask_loss_strategy": None, # multi-channel decoding exclusive parameter
+    },
+    "mc13_full_plus_512": { # multi-channel decoding task of {34 classes + drums + singing & chorus} mapped to 13 channels
+        "name": "mc13_full_plus_512",
+        "train_program_vocab": program_vocab_presets["mt3_full_plus"],
+        "train_drum_vocab": drum_vocab_presets["gm"],
+        "program2channel_vocab_source": program_vocab_presets["gm_plus"],
+        "num_decoding_channels": 13,
+        "max_note_token_length_per_ch": 512, # multi-channel decoding exclusive parameter
+        "mask_loss_strategy": None, # multi-channel decoding exclusive parameter
+    },
     "exc_v1": {
         "name": "exclusive",
         "train_program_vocab": program_vocab_presets["mt3_full_plus"],

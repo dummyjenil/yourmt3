@@ -186,7 +186,7 @@ class NoteEventTokenizer(EventTokenizerBase):
             if stk == 'EOS':
                 self._suffix.append(self.codec.special_tokens.index('EOS'))
             elif stk == 'PAD':
-                self._zero_pad = [0] * 1024
+                self._zero_pad = [0] * 1024 #probably should be * max_lenght
             elif stk == 'UNK':
                 pass
             else:
@@ -241,7 +241,9 @@ class NoteEventTokenizer(EventTokenizerBase):
             max_length = self.max_length
 
         length = len(encoded)
+        #print('token len', length)
         if length >= max_length:
+            print("Exceeded max_length")
             encoded = encoded[:max_length]
             length = max_length
 

@@ -17,6 +17,45 @@ from copy import deepcopy
 if torch.__version__ >= "1.13":
         torch.set_float32_matmul_precision("high")
 
+def filter_instrument_consistency(pred_notes,confidence_threshold:float, primary_instrument=None,allow=True):
+    if not allow or not pred_notes:
+        return pred_notes
+    
+    # Count instrument occurrences to find dominant instrument
+    instrument_counts = {}
+    total_notes = len(pred_notes)
+    
+    for note in pred_notes:
+        program = getattr(note, 'program', 0)
+        instrument_counts[program] = instrument_counts.get(program, 0) + 1
+    
+    # Determine primary instrument
+    if primary_instrument is None:
+        primary_instrument = max(instrument_counts, key=instrument_counts.get)
+    
+    primary_count = instrument_counts.get(primary_instrument, 0)
+    primary_ratio = primary_count / total_notes if total_notes > 0 else 0
+    
+    # If primary instrument is dominant enough, filter out other instruments
+    if primary_ratio >= confidence_threshold:
+        filtered_notes = []
+        for note in pred_notes:
+            note_program = getattr(note, 'program', 0)
+            if note_program == primary_instrument:
+                filtered_notes.append(note)
+            else:
+                # Convert note to primary instrument
+                note_copy = note.__class__(
+                    start=note.start,
+                    end=note.end, 
+                    pitch=note.pitch,
+                    velocity=note.velocity,
+                    program=primary_instrument
+                )
+                filtered_notes.append(note_copy)
+        return filtered_notes
+    
+    return pred_notes
 
 def model_name2conf(model_name,precision):
     args = ['-pr', precision]
@@ -25,7 +64,9 @@ def model_name2conf(model_name,precision):
     if "Multi" in model_name:
         args = args + ['-tk', 'mc13_full_plus_256', '-dec', 'multi-t5','-nl', '26']
     if "MoE" in model_name:
-        args = ['-sqr', '1', '-ff', 'moe','-wf', '4', '-nmoe', '8', '-kmoe', '2', '-act', 'silu', '-epe', 'rope','-rp', '1']
+        args = args + ['-sqr', '1', '-ff', 'moe','-wf', '4', '-nmoe', '8', '-kmoe', '2', '-act', 'silu', '-epe', 'rope','-rp', '1']
+    if "MusicFM" in model_name:
+        args = args + ['-if', '87381', '-enc', 'musicfm', '-dpe', 'rope', '-sqr', '1', '-tk', 'mc13_full_plus_1024', '-dec', 'multi-dec']
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ac', '--audio-codec', type=str, default=None, help='audio codec (default=None). {"spec", "melspec"}. If None, default value defined in config.py will be used.')
@@ -91,33 +132,39 @@ def model_name2conf(model_name,precision):
     return args
 
 
-class YMT3(YourMT3):
-
-    def __init__(self,model_path,model_name:Literal["YMT3+", "YPTF+Single (noPS)", "YPTF+Multi (PS)", "YPTF.MoE+Multi (noPS)", "YPTF.MoE+Multi (PS)"],precision:Literal["32", "bf16-mixed", "16"],device):
+class YMT3:
+    def __init__(self,model_path,model_name:Literal["YMT3+", "YPTF+Single", "YPTF+Multi", "YPTF+MoE+Multi","YMT3+MusicFM"],precision:Literal["32", "bf16-mixed", "16"],device):
         args = model_name2conf(model_name,precision)
         shared_cfg, audio_cfg, model_cfg = update_config(args, deepcopy(def_shared_cfg), stage='test')
-        super().__init__(audio_cfg,model_cfg,shared_cfg,optimizer=None,task_manager=TaskManager(task_name=args.task,max_shift_steps=int(shared_cfg["TOKENIZER"]["max_shift_steps"]),debug_mode=args.debug_mode),write_output_dir=".")
-        self.to(device)
-        self.load_state_dict(torch.load(model_path),strict=False)
-        self.eval()
+        self.model = YourMT3(audio_cfg,model_cfg,shared_cfg,optimizer=None,task_manager=TaskManager(task_name=args.task,max_shift_steps=int(shared_cfg["TOKENIZER"]["max_shift_steps"]),debug_mode=args.debug_mode),eval_subtask_key=args.eval_subtask_key)
+        self.model.to(device)
+        self.model.load_state_dict(torch.load(model_path),strict=False)
+        self.model.eval()
 
+    def create_instrument_task_tokens(self, n_segments,instrument):
+        if instrument:
+            task_token_ids = [self.model.task_manager.tokenizer.codec.encode_event(event) for event in self.model.task_manager.task['eval_subtask_prefix'][instrument]]
+            task_tokens = torch.zeros((n_segments, 1, len(task_token_ids)), dtype=torch.long, device=self.model.device)
+            for i in range(n_segments):
+                task_tokens[i, 0, :] = torch.tensor(task_token_ids, dtype=torch.long)
+            return task_tokens
 
-    def predict(self,filepath,callback:Callable[[int,int],None]=None,batch_size=8,output_path="output.mid"):
+    def predict(self,filepath,instrument:Literal["singing-only","drum-only"]=None,confidence_threshold:float=0.7,callback:Callable[[int,int],None]=None,batch_size=8,output_path="output.mid"):
         audio, sr = torchaudio.load(filepath)
         audio = torch.mean(audio, dim=0).unsqueeze(0)
-        audio = torchaudio.functional.resample(audio, sr, self.audio_cfg['sample_rate'])
-        audio_segments = slice_padded_array(audio, self.audio_cfg['input_frames'], self.audio_cfg['input_frames'])
-        audio_segments = torch.from_numpy(audio_segments.astype('float32')).to(self.device).unsqueeze(1) # (n_seg, 1, seg_sz)
-        pred_token_arr, _ = self.inference_file(bsz=batch_size, audio_segments=audio_segments,callback=callback)
-        num_channels = self.task_manager.num_decoding_channels
+        audio = torchaudio.functional.resample(audio, sr, self.model.audio_cfg['sample_rate'])
+        audio_segments = slice_padded_array(audio, self.model.audio_cfg['input_frames'], self.model.audio_cfg['input_frames'])
+        audio_segments = torch.from_numpy(audio_segments.astype('float32')).to(self.model.device).unsqueeze(1) # (n_seg, 1, seg_sz)
         n_items = audio_segments.shape[0]
-        start_secs_file = [self.audio_cfg['input_frames'] * i / self.audio_cfg['sample_rate'] for i in range(n_items)]
+        pred_token_arr, _ = self.model.inference_file(bsz=batch_size, audio_segments=audio_segments,callback=callback,task_token_array=self.create_instrument_task_tokens(n_items,instrument))
+        num_channels = self.model.task_manager.num_decoding_channels
+        start_secs_file = [self.model.audio_cfg['input_frames'] * i / self.model.audio_cfg['sample_rate'] for i in range(n_items)]
         pred_notes_in_file = []
         for ch in range(num_channels):
             pred_token_arr_ch = [arr[:, ch, :] for arr in pred_token_arr]  # (B, L)
-            zipped_note_events_and_tie, _, _ = self.task_manager.detokenize_list_batches(pred_token_arr_ch, start_secs_file, return_events=True)
+            zipped_note_events_and_tie, _, _ = self.model.task_manager.detokenize_list_batches(pred_token_arr_ch, start_secs_file, return_events=True)
             pred_notes_ch, _ = merge_zipped_note_events_and_ties_to_notes(zipped_note_events_and_tie)
             pred_notes_in_file.append(pred_notes_ch)
-        note_event2midi(note2note_event([note if note.is_drum else Note(is_drum=note.is_drum,program=self.midi_output_inverse_vocab.get(note.program, [note.program])[0],onset=note.onset,offset=note.offset,pitch=note.pitch,velocity=note.velocity) for note in mix_notes(pred_notes_in_file)], return_activity=False), output_path, output_inverse_vocab=self.midi_output_inverse_vocab)
+        note_event2midi(note2note_event([note if note.is_drum else Note(is_drum=note.is_drum,program=self.model.midi_output_inverse_vocab.get(note.program, [note.program])[0],onset=note.onset,offset=note.offset,pitch=note.pitch,velocity=note.velocity) for note in filter_instrument_consistency(mix_notes(pred_notes_in_file),confidence_threshold,allow=bool(instrument))], return_activity=False), output_path, output_inverse_vocab=self.model.midi_output_inverse_vocab)
         return output_path
 

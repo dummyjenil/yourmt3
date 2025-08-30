@@ -168,28 +168,67 @@ class AdamWScale(Optimizer):
 def get_optimizer(models_dict: nn.ModuleDict,
                   optimizer_name: str,
                   base_lr: float,
-                  weight_decay: float = 0.):
+                  weight_decay: float = 0.,
+                  pretrained_encoder: bool = False):
+
+    # Determine default base_lr based on optimizer if not provided
+    if optimizer_name.lower() == 'adamw':
+        base_lr = 1e-03 if base_lr is None else float(base_lr)
+    elif optimizer_name.lower() == 'adafactor':
+    # Adafactor handles lr differently; base_lr can remain None or as provided
+        pass
+    elif optimizer_name.lower() == 'adamwscale':
+        base_lr = 1e-02 if base_lr is None else float(base_lr)
+    elif optimizer_name.lower() == 'cpuadam':
+        base_lr = 1e-03 if base_lr is None else float(base_lr)
+    elif optimizer_name.lower() == 'dadaptadam':
+        base_lr = 1.0 if base_lr is None else float(base_lr)
+    else:
+        raise NotImplementedError(optimizer_name)
+
+    if pretrained_encoder: 
+        if base_lr is None:
+            encoder_lr = base_lr
+        else:
+            encoder_lr = base_lr * 0.01
+    else:
+        encoder_lr = base_lr
+
+    #encoder_lr = base_lr * 0.01 if pretrained_encoder and base_lr is not None else base_lr
 
     no_decay = [
         "bias", "LayerNorm", "layernorm", "layer_norm", "ln", "BatchNorm", "bn", "batch_norm",
         "batchnorm"
     ]
+
     optimizer_grouped_parameters = []
     for n, p in models_dict:
-        # drop pitch shifter
+        # Drop pitch shifter
         if 'pshifters' in n:
             continue
-        # no decay
-        if n in no_decay:
-            optimizer_grouped_parameters.append({"params": [p], "weight_decay": 0.0})
-        else:
-            optimizer_grouped_parameters.append({"params": [p], "weight_decay": weight_decay})
 
+        # Determine if parameter is part of the encoder
+        is_encoder = pretrained_encoder and 'encoder.' in n
+
+        # Determine if parameter should have no decay
+        has_no_decay = any(nd in n for nd in no_decay)
+
+        param_group = {
+            "params": p,
+            "weight_decay": 0.0 if has_no_decay else weight_decay
+        }
+
+        # Assign lower learning rate to encoder parameters if pretrained
+        if is_encoder:
+            param_group["lr"] = encoder_lr
+
+        optimizer_grouped_parameters.append(param_group)
+
+    # Initialize the optimizer with grouped parameters
     if optimizer_name.lower() == 'adamw':
-        base_lr = 1e-03 if base_lr == None else float(base_lr)
         opt = AdamW(optimizer_grouped_parameters, lr=base_lr)
     elif optimizer_name.lower() == 'adafactor':
-        if base_lr == None:
+        if base_lr is None:
             opt = Adafactor(
                 optimizer_grouped_parameters,
                 lr=None,
@@ -199,18 +238,15 @@ def get_optimizer(models_dict: nn.ModuleDict,
         else:
             opt = Adafactor(optimizer_grouped_parameters, lr=base_lr, relative_step=False)
     elif optimizer_name.lower() == 'adamwscale':
-        base_lr = 1e-02 if base_lr == None else float(base_lr)
         opt = AdamWScale(
             optimizer_grouped_parameters,
             lr=base_lr,
         )
     elif optimizer_name.lower() == 'cpuadam':
         dspd = importlib.import_module('deepspeed')
-        base_lr = 1e-03 if base_lr == None else float(base_lr)
         opt = dspd.ops.adam.cpu_adam.DeepSpeedCPUAdam(optimizer_grouped_parameters, lr=base_lr)
     elif optimizer_name.lower() == 'dadaptadam':
         dadaptation = importlib.import_module('dadaptation')
-        base_lr = 1.0 if base_lr == None else float(base_lr)
         opt = dadaptation.DAdaptAdam(optimizer_grouped_parameters, lr=base_lr)
     else:
         raise NotImplementedError(optimizer_name)
