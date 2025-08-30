@@ -31,7 +31,8 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 from transformers.utils import logging
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
-from transformers.models.t5.modeling_t5 import (T5LayerNorm, T5LayerSelfAttention, T5LayerCrossAttention, T5LayerFF, Cache, DynamicCache, EncoderDecoderCache, StaticCache, is_torchdynamo_compiling)
+from transformers.models.t5.modeling_t5 import (T5LayerNorm, T5LayerSelfAttention, T5LayerCrossAttention, T5LayerFF, Cache, DynamicCache, EncoderDecoderCache, is_torchdynamo_compiling)
+from transformers.cache_utils import StaticCache
 from transformers.modeling_outputs import (BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions)
 from transformers import T5Config, T5PreTrainedModel
 from yourmt3.model.positional_encoding import FixedSinusoidalPositionalEmbedding

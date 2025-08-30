@@ -15,7 +15,7 @@ from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 if is_torch_flex_attn_available():
     from torch.nn.attention.flex_attention import BlockMask
 
-    from ...integrations.flex_attention import make_flex_block_causal_mask
+    from transformers.integrations.flex_attention import make_flex_block_causal_mask
 
 from transformers.cache_utils import Cache, DynamicCache, EncoderDecoderCache, StaticCache
 
