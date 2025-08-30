@@ -106,7 +106,7 @@ model_cfg = {
     "decoder": {
         "t5": {
             "d_model": 512, # Hidden size of T5 encoder. If encoder has lower dim, it is projected to this dim for enc-dec cross att.
-            "num_heads": 8,
+            "num_heads": 6,
             "num_layers": 8,
             "dropout_rate": 0.05,
             "position_encoding_type": "sinusoidal", # {'sinusoidal', 'trainable'}.
@@ -115,7 +115,7 @@ model_cfg = {
         },
         "multi-t5": {
             "d_model": 512, # Hidden size of T5 encoder. Recommended: {256 or 512}
-            "num_heads": 8, # 6 originally
+            "num_heads": 6,
             "num_layers": 8,
             "dropout_rate": 0.05,
             "position_encoding_type": "sinusoidal", # {'sinusoidal', 'trainable'}.
