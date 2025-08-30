@@ -19,10 +19,10 @@ pip  install  yourmt3
 
 ```python
 import gradio as gr
-import yourmt3
+from yourmt3 import YMT3
 from huggingface_hub import hf_hub_download
 import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = yourmt3.YMT3(hf_hub_download("shethjenil/Audio2Midi_Models","YPTF+MoE+Multi 1.pt"),"YPTF+MoE+Multi","32" if device == "cpu" else "16",torch.device(device))
-gr.Interface(lambda  path,batch_size,progress=gr.Progress():model.predict(path,lambda  i,total:progress((i,total)),batch_size),[gr.Audio(type="filepath",label="Audio"),gr.Number(8,label="Batch Size")],gr.File(label="midi")).launch()
+model = YMT3(hf_hub_download("shethjenil/Audio2Midi_Models","YPTF+MoE+Multi 2.pt"),"YPTF+MoE+Multi","32" if device == "cpu" else "16",torch.device(device))
+gr.Interface(lambda path,batch_size,confidence_threshold,instrument,progress=gr.Progress():model.predict(path,batch_size,confidence_threshold,instrument,lambda i,total:progress((i,total)),),[gr.Audio(type="filepath",label="Audio"),gr.Number(8,label="Batch Size"),gr.Slider(0,1,0.7,step=0.01,label="Confidence Threshold"),gr.Dropdown(["default","singing-only","drum-only"])],gr.File(label="midi")).launch()
 ```

@@ -142,14 +142,14 @@ class YMT3:
         self.model.eval()
 
     def create_instrument_task_tokens(self, n_segments,instrument):
-        if instrument:
+        if instrument != "default":
             task_token_ids = [self.model.task_manager.tokenizer.codec.encode_event(event) for event in self.model.task_manager.task['eval_subtask_prefix'][instrument]]
             task_tokens = torch.zeros((n_segments, 1, len(task_token_ids)), dtype=torch.long, device=self.model.device)
             for i in range(n_segments):
                 task_tokens[i, 0, :] = torch.tensor(task_token_ids, dtype=torch.long)
             return task_tokens
 
-    def predict(self,filepath,instrument:Literal["singing-only","drum-only"]=None,confidence_threshold:float=0.7,callback:Callable[[int,int],None]=None,batch_size=8,output_path="output.mid"):
+    def predict(self,filepath,batch_size=8,confidence_threshold:float=0.7,instrument:Literal["singing-only","drum-only","default"]="default",callback:Callable[[int,int],None]=None,output_path="output.mid"):
         audio, sr = torchaudio.load(filepath)
         audio = torch.mean(audio, dim=0).unsqueeze(0)
         audio = torchaudio.functional.resample(audio, sr, self.model.audio_cfg['sample_rate'])
