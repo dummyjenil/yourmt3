@@ -11,11 +11,11 @@ from yourmt3.utils.utils import str2bool
 from yourmt3.model.ymt3 import YourMT3
 from yourmt3.model.init_train import update_config
 from yourmt3.config.config import shared_cfg as def_shared_cfg
-import argparse
+from argparse import ArgumentParser
 from copy import deepcopy
 
 if torch.__version__ >= "1.13":
-        torch.set_float32_matmul_precision("high")
+    torch.set_float32_matmul_precision("high")
 
 def filter_instrument_consistency(pred_notes,confidence_threshold:float, primary_instrument=None,allow=True):
     if not allow or not pred_notes:
@@ -68,7 +68,7 @@ def model_name2conf(model_name,precision):
     if "MusicFM" in model_name:
         args = args + ['-if', '87381', '-enc', 'musicfm', '-dpe', 'rope', '-sqr', '1', '-tk', 'mc13_full_plus_1024', '-dec', 'multi-dec']
 
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParser()
     parser.add_argument('-ac', '--audio-codec', type=str, default=None, help='audio codec (default=None). {"spec", "melspec"}. If None, default value defined in config.py will be used.')
     parser.add_argument('-hop', '--hop-length', type=int, default=None, help='hop length in frames (default=None). {128, 300} 128 for MT3, 300 for PerceiverTFIf None, default value defined in config.py will be used.')
     parser.add_argument('-nmel', '--n-mels', type=int, default=None, help='number of mel bins (default=None). If None, default value defined in config.py will be used.')

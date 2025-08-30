@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "dummyjenil", email = "dummyjenil@gmail.com" }
 ]
-dependencies = ['mido','mir_eval','lightning','einops','transformers==4.45.1',"torchaudio","scikit-learn"]
+dependencies = ['mido','mir_eval','lightning','einops','transformers',"torchaudio","scikit-learn"]
 
 [build-system]
 requires = ["hatchling"]
